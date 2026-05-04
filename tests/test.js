@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { makeConfig, dispatchToolCall } = require('../server/server');
+const { makeConfig, dispatchToolCall, TOOL_META } = require('../server/server');
 
 async function expectReject(fn, pattern) {
   let rejected = false;
@@ -24,6 +24,10 @@ async function main() {
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# hci-humanizer\n\nRewrite text to sound less generic.\n', 'utf8');
 
+  assert.equal(TOOL_META['github.createPR'].risk, 'github-write');
+  assert.equal(TOOL_META['git.commit'].risk, 'git-write');
+  assert.equal(TOOL_META['git.push'].risk, 'git-push');
+
   const readonly = makeConfig({ WAAB_WORKSPACE: workspace, WAAB_SKILL_PATHS: skillsDir });
 
   const echo = await dispatchToolCall({ tool: 'safe.echo', args: { ok: true } }, readonly);
@@ -37,6 +41,21 @@ async function main() {
   await expectReject(
     () => dispatchToolCall({ tool: 'file.read', args: { path: '../escape.txt' } }, readonly),
     /escapes WAAB_WORKSPACE/
+  );
+
+  await expectReject(
+    () => dispatchToolCall({ tool: 'git.commit', args: { message: 'test' } }, readonly),
+    /WAAB_ENABLE_GIT_WRITE/
+  );
+
+  await expectReject(
+    () => dispatchToolCall({ tool: 'git.push', args: { branch: 'main' } }, makeConfig({ WAAB_WORKSPACE: workspace, WAAB_ENABLE_GIT_WRITE: '1' })),
+    /WAAB_ENABLE_GIT_PUSH/
+  );
+
+  await expectReject(
+    () => dispatchToolCall({ tool: 'github.createPR', args: { repo: 'hushuning/-1', head: 'x', base: 'master' } }, readonly),
+    /WAAB_ENABLE_GITHUB_WRITE/
   );
 
   const skills = await dispatchToolCall({ tool: 'skills.list', args: {} }, readonly);
@@ -67,6 +86,11 @@ async function main() {
   const memory = await dispatchToolCall({ tool: 'memory.read', args: {} }, autopilot);
   assert.equal(memory.memories.length, 1);
   assert.match(memory.memories[0].content, /learned rule/);
+
+  await expectReject(
+    () => dispatchToolCall({ tool: 'git.commit', args: { message: 'blocked' } }, makeConfig({ WAAB_WORKSPACE: workspace, WAAB_AUTOPILOT: '1', WAAB_ENABLE_GIT_WRITE: '1', WAAB_AUTO_TOOLS: 'git.add' })),
+    /not in WAAB_AUTO_TOOLS/
+  );
 
   console.log('All tests passed.');
 }
