@@ -35,6 +35,7 @@ function makeConfig(env = process.env) {
     autoTools: new Set(splitList(env.WAAB_AUTO_TOOLS)),
     enableWrite: String(env.WAAB_ENABLE_WRITE || '').trim() === '1',
     enableGitWrite: String(env.WAAB_ENABLE_GIT_WRITE || '').trim() === '1',
+    enableGitPush: String(env.WAAB_ENABLE_GIT_PUSH || '').trim() === '1',
     enableShell: String(env.WAAB_ENABLE_SHELL || '').trim() === '1',
     enableGithubWrite: String(env.WAAB_ENABLE_GITHUB_WRITE || '').trim() === '1',
     allowedTestCommands: new Set(splitList(env.WAAB_ALLOWED_TEST_COMMANDS || 'npm test,npm run lint,pytest')),
@@ -55,9 +56,15 @@ const TOOL_META = {
   'git.status': { risk: 'read', description: 'Run git status --short --branch.' },
   'git.diff': { risk: 'read', description: 'Run git diff.' },
   'git.createBranch': { risk: 'git-write', description: 'Create or reset a task branch.' },
+  'git.add': { risk: 'git-write', description: 'Stage files.' },
+  'git.commit': { risk: 'git-write', description: 'Create a local commit.' },
+  'git.push': { risk: 'git-push', description: 'Push current or specified branch.' },
   'test.run': { risk: 'shell', description: 'Run an allowlisted test command.' },
   'github.repoInfo': { risk: 'read', description: 'Return GitHub repo metadata.' },
+  'github.listIssues': { risk: 'read', description: 'List GitHub issues.' },
   'github.createIssue': { risk: 'github-write', description: 'Create a GitHub issue.' },
+  'github.commentIssue': { risk: 'github-write', description: 'Comment on a GitHub issue or PR.' },
+  'github.createPR': { risk: 'github-write', description: 'Create a GitHub pull request.' },
   'memory.write': { risk: 'write', description: 'Append a local task memory note.' },
   'memory.read': { risk: 'read', description: 'Read local task memory notes.' },
   'mcp.servers': { risk: 'read', description: 'Discover common MCP config server names.' },
@@ -67,7 +74,7 @@ const TOOL_META = {
   'skills.installFromGitHub': { risk: 'read', description: 'Generate install commands for a GitHub-hosted skill.' }
 };
 
-const AUTOPILOT_RISKS = new Set(['write', 'git-write', 'shell', 'github-write']);
+const AUTOPILOT_RISKS = new Set(['write', 'git-write', 'git-push', 'shell', 'github-write']);
 
 function fail(message, statusCode = 403) {
   const err = new Error(message);
@@ -82,6 +89,7 @@ function policySummary(config) {
     autoTools: [...config.autoTools],
     enableWrite: config.enableWrite,
     enableGitWrite: config.enableGitWrite,
+    enableGitPush: config.enableGitPush,
     enableShell: config.enableShell,
     enableGithubWrite: config.enableGithubWrite,
     allowedTestCommands: [...config.allowedTestCommands],
@@ -98,6 +106,10 @@ function assertPolicy(tool, config) {
   }
   if (meta.risk === 'write' && !config.enableWrite) fail(`${tool} requires WAAB_ENABLE_WRITE=1.`);
   if (meta.risk === 'git-write' && !config.enableGitWrite) fail(`${tool} requires WAAB_ENABLE_GIT_WRITE=1.`);
+  if (meta.risk === 'git-push') {
+    if (!config.enableGitWrite) fail(`${tool} requires WAAB_ENABLE_GIT_WRITE=1.`);
+    if (!config.enableGitPush) fail(`${tool} requires WAAB_ENABLE_GIT_PUSH=1.`);
+  }
   if (meta.risk === 'shell' && !config.enableShell) fail(`${tool} requires WAAB_ENABLE_SHELL=1.`);
   if (meta.risk === 'github-write') {
     if (!config.enableGithubWrite) fail(`${tool} requires WAAB_ENABLE_GITHUB_WRITE=1.`);
@@ -157,6 +169,31 @@ function parseCommand(commandLine) {
   return { command: parts[0], args: parts.slice(1), normalized: trimmed };
 }
 
+function safeBranchName(branch) {
+  const value = String(branch || '').trim();
+  if (!/^[a-zA-Z0-9._/-]+$/.test(value)) fail('Invalid branch name.');
+  if (value.startsWith('-') || value.includes('..') || value.includes('//')) fail('Unsafe branch name.');
+  return value;
+}
+
+function safeCommitMessage(message) {
+  const value = String(message || '').trim();
+  if (!value) fail('Missing commit message.');
+  if (value.length > 500) fail('Commit message too long.');
+  return value;
+}
+
+function normalizeFileList(files) {
+  if (!files) return ['.'];
+  const list = Array.isArray(files) ? files : [files];
+  if (!list.length) return ['.'];
+  return list.map((item) => {
+    const value = String(item || '').trim();
+    if (!value || value.startsWith('-') || path.isAbsolute(value) || value.includes('..')) fail(`Unsafe git path: ${value}`);
+    return value;
+  });
+}
+
 function skillNameIsSafe(name) {
   return typeof name === 'string' && /^[a-zA-Z0-9._-]+$/.test(name);
 }
@@ -210,6 +247,18 @@ async function githubJson(pathname, options = {}, config) {
   return { ok: res.ok, status: res.status, result: json };
 }
 
+function assertRepo(repo) {
+  const value = String(repo || '').trim();
+  if (!/^[^/\s]+\/[^/\s]+$/.test(value)) fail('repo must be owner/name.');
+  return value;
+}
+
+function issueNumber(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) fail('issue_number must be a positive integer.');
+  return n;
+}
+
 async function dispatchToolCall(call, config = makeConfig()) {
   const tool = call && call.tool;
   const args = (call && call.args) || {};
@@ -239,26 +288,48 @@ async function dispatchToolCall(call, config = makeConfig()) {
     }
     case 'git.status': return runCommand('git', ['status', '--short', '--branch'], config.workspace);
     case 'git.diff': return runCommand('git', ['diff'], config.workspace);
-    case 'git.createBranch': {
-      const branch = String(args.branch || '').trim();
-      if (!/^[a-zA-Z0-9._/-]+$/.test(branch)) fail('Invalid branch name.');
-      return runCommand('git', ['checkout', '-B', branch], config.workspace);
+    case 'git.createBranch': return runCommand('git', ['checkout', '-B', safeBranchName(args.branch)], config.workspace);
+    case 'git.add': return runCommand('git', ['add', '--', ...normalizeFileList(args.files)], config.workspace);
+    case 'git.commit': return runCommand('git', ['commit', '-m', safeCommitMessage(args.message)], config.workspace);
+    case 'git.push': {
+      const remote = String(args.remote || 'origin').trim();
+      if (!/^[a-zA-Z0-9._-]+$/.test(remote)) fail('Invalid remote name.');
+      const branch = safeBranchName(args.branch);
+      return runCommand('git', ['push', '-u', remote, branch], config.workspace, Number(args.timeoutMs || 120000));
     }
     case 'test.run': {
       const parsed = parseCommand(args.command);
       if (!config.allowedTestCommands.has(parsed.normalized)) fail(`Command is not in WAAB_ALLOWED_TEST_COMMANDS: ${parsed.normalized}`);
       return runCommand(parsed.command, parsed.args, config.workspace, Number(args.timeoutMs || 120000));
     }
-    case 'github.repoInfo': {
-      const repo = String(args.repo || '').trim();
-      if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) fail('repo must be owner/name.');
-      return githubJson(`/repos/${repo}`, {}, config);
+    case 'github.repoInfo': return githubJson(`/repos/${assertRepo(args.repo)}`, {}, config);
+    case 'github.listIssues': {
+      const repo = assertRepo(args.repo);
+      const state = ['open', 'closed', 'all'].includes(args.state) ? args.state : 'open';
+      const perPage = Math.min(Math.max(Number(args.per_page || 10), 1), 50);
+      return githubJson(`/repos/${repo}/issues?state=${state}&per_page=${perPage}`, {}, config);
     }
     case 'github.createIssue': {
-      const repo = String(args.repo || '').trim();
-      if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) fail('repo must be owner/name.');
+      const repo = assertRepo(args.repo);
       const body = JSON.stringify({ title: String(args.title || 'WAAB issue'), body: String(args.body || '') });
       return githubJson(`/repos/${repo}/issues`, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } }, config);
+    }
+    case 'github.commentIssue': {
+      const repo = assertRepo(args.repo);
+      const number = issueNumber(args.issue_number || args.number);
+      const body = JSON.stringify({ body: String(args.body || '') });
+      return githubJson(`/repos/${repo}/issues/${number}/comments`, { method: 'POST', body, headers: { 'Content-Type': 'application/json' } }, config);
+    }
+    case 'github.createPR': {
+      const repo = assertRepo(args.repo);
+      const payload = {
+        title: String(args.title || 'WAAB pull request'),
+        body: String(args.body || ''),
+        head: safeBranchName(args.head),
+        base: safeBranchName(args.base || 'main'),
+        draft: Boolean(args.draft)
+      };
+      return githubJson(`/repos/${repo}/pulls`, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } }, config);
     }
     case 'memory.write': {
       const dir = safeResolve(config, '.waab-memory');
@@ -283,9 +354,8 @@ async function dispatchToolCall(call, config = makeConfig()) {
       return { skill: skill.name, prompt };
     }
     case 'skills.installFromGitHub': {
-      const repo = String(args.repo || 'sarkrui/CCSwitchSkills').trim();
+      const repo = assertRepo(args.repo || 'sarkrui/CCSwitchSkills');
       const skill = String(args.skill || 'hci-humanizer').trim();
-      if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) fail('repo must be owner/name.');
       if (!skillNameIsSafe(skill)) fail('Invalid skill name.');
       return { repo, skill, note: 'Commands only; WAAB does not execute install automatically.', commands: [`git clone https://github.com/${repo}.git`, 'mkdir -p ~/.claude/skills', `cp -r ${path.basename(repo)}/${skill} ~/.claude/skills/`] };
     }
@@ -315,7 +385,7 @@ function createServer(config = makeConfig()) {
     try {
       if (req.method === 'OPTIONS') return sendJson(res, 200, { ok: true });
       const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
-      if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { ok: true, service: 'waab', version: '0.3.0', policy: policySummary(config) });
+      if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { ok: true, service: 'waab', version: '0.4.0', policy: policySummary(config) });
       if (req.method === 'GET' && url.pathname === '/tools') return sendJson(res, 200, { ok: true, tools: await dispatchToolCall({ tool: 'tools.list', args: {} }, config) });
       if (req.method === 'POST' && url.pathname === '/tool/call') {
         const call = JSON.parse(await readBody(req) || '{}');
