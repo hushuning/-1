@@ -1,0 +1,12 @@
+{
+  "name": "web-ai-agent-bridge",
+  "version": "0.2.0",
+  "private": false,
+  "scripts": {
+    "test": "node tests/test.js",
+    "start": "node server/server.js",
+    "start:dev": "WAAB_ENABLE_SHELL=1 WAAB_ENABLE_WRITE=1 WAAB_ENABLE_GIT_WRITE=1 node server/server.js",
+    "dev": "node --watch server/server.js"
+  },
+  "license": "MIT"
+}
