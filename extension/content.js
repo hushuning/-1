@@ -7,6 +7,14 @@
     'shell.run', 'test.run', 'memory.write', 'mcp.tool.call'
   ]);
 
+  function getSettings() {
+    return new Promise((resolve) => {
+      chrome.storage.sync.get(['autoApproveHighRisk'], (items) => {
+        resolve({ autoApproveHighRisk: items.autoApproveHighRisk === true });
+      });
+    });
+  }
+
   function parseAgentCalls(text) {
     const calls = [];
     const blockRe = /```agent-call\s*([\s\S]*?)```/g;
@@ -88,8 +96,9 @@
   }
 
   async function executeCall(call) {
-    if (DANGEROUS_TOOLS.has(call.tool)) {
-      const ok = confirm(`WAAB wants to run high-risk tool: ${call.tool}\n\nAllow once?`);
+    const settings = await getSettings();
+    if (DANGEROUS_TOOLS.has(call.tool) && !settings.autoApproveHighRisk) {
+      const ok = confirm(`WAAB wants to run high-risk tool: ${call.tool}\n\nAllow once?\n\nTo skip this dialog, enable Auto-approve in the extension popup. The local server policy will still enforce WAAB_AUTO_TOOLS and environment flags.`);
       if (!ok) return { ok: false, error: 'User rejected high-risk tool call.' };
     }
     return sendMessage('WAAB_TOOL_CALL', call);
