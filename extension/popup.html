@@ -3,24 +3,39 @@
 <head>
   <meta charset="utf-8" />
   <style>
-    body { font-family: system-ui, sans-serif; width: 360px; padding: 12px; }
-    input { width: 100%; box-sizing: border-box; padding: 8px; }
+    body { font-family: system-ui, sans-serif; width: 380px; padding: 12px; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 8px; }
     button { margin-top: 8px; padding: 8px 10px; cursor: pointer; }
     pre { white-space: pre-wrap; background: #f4f4f4; padding: 8px; border-radius: 6px; max-height: 260px; overflow: auto; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; }
     .muted { color: #666; font-size: 12px; }
+    .danger { border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 10px 0; }
+    label { display: block; margin: 8px 0 4px; }
+    .check { display: flex; gap: 8px; align-items: flex-start; }
   </style>
 </head>
 <body>
   <h3>Web AI Agent Bridge</h3>
   <label>Agent Server URL</label>
-  <input id="serverUrl" placeholder="http://127.0.0.1:8765" />
+  <input id="serverUrl" type="text" placeholder="http://127.0.0.1:8765" />
+
+  <div class="danger">
+    <label class="check">
+      <input id="autoApproveHighRisk" type="checkbox" />
+      <span>
+        Auto-approve high-risk tool calls
+        <br />
+        <span class="muted">跳过浏览器确认弹窗；本地 server 仍会按 WAAB_AUTOPILOT / WAAB_AUTO_TOOLS 拦截。</span>
+      </span>
+    </label>
+  </div>
+
   <div class="row">
     <button id="save">Save</button>
     <button id="health">Health</button>
     <button id="tools">Tools</button>
   </div>
-  <p class="muted">危险工具会弹窗确认；插件只回填结果，不自动发送。</p>
+  <p class="muted">插件只回填结果，不自动发送。全自动执行请同时配置 server 白名单。</p>
   <pre id="status">Ready.</pre>
   <script src="popup.js"></script>
 </body>
