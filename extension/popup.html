@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: system-ui, sans-serif; width: 360px; padding: 12px; }
+    input { width: 100%; box-sizing: border-box; padding: 8px; }
+    button { margin-top: 8px; padding: 8px 10px; cursor: pointer; }
+    pre { white-space: pre-wrap; background: #f4f4f4; padding: 8px; border-radius: 6px; max-height: 260px; overflow: auto; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .muted { color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h3>Web AI Agent Bridge</h3>
+  <label>Agent Server URL</label>
+  <input id="serverUrl" placeholder="http://127.0.0.1:8765" />
+  <div class="row">
+    <button id="save">Save</button>
+    <button id="health">Health</button>
+    <button id="tools">Tools</button>
+  </div>
+  <p class="muted">危险工具会弹窗确认；插件只回填结果，不自动发送。</p>
+  <pre id="status">Ready.</pre>
+  <script src="popup.js"></script>
+</body>
+</html>
