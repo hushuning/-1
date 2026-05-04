@@ -9,7 +9,6 @@
     "https://chat.openai.com/*",
     "https://claude.ai/*",
     "https://gemini.google.com/*",
-    "https://github.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -22,8 +21,7 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://claude.ai/*",
-        "https://gemini.google.com/*",
-        "https://github.com/*"
+        "https://gemini.google.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
