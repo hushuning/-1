@@ -2,91 +2,17 @@
   'use strict';
 
   const PROCESSED_ATTR = 'data-waab-processed';
-  const AUTOCLICK_ATTR = 'data-waab-autoclicked';
   const DANGEROUS_TOOLS = new Set([
     'file.write', 'file.append', 'git.syncMain', 'git.createBranch', 'github.createIssue',
     'shell.run', 'test.run', 'memory.write', 'mcp.tool.call'
   ]);
 
-  const SAFE_CONFIRM_RE = /^(confirm|continue|allow|approve|ok|yes|save changes|update branch|merge pull request|create pull request)$/i;
-  const AUTH_CONFIRM_RE = /^(authorize|authorize .+|grant access|install|install & authorize|request access|approve access)$/i;
-  const DANGER_TEXT_RE = /(delete|remove|revoke|transfer|disable|suspend|deactivate|unlink|disconnect|sign out|reset|permanently|payment|purchase|checkout|deploy|publish|secret|token|ssh key|close account|archive repository)/i;
-  const GITHUB_TEXT_RE = /(github|repository|pull request|branch|commit|issue|codespace|oauth|permission|access)/i;
-
   function getSettings() {
     return new Promise((resolve) => {
-      chrome.storage.sync.get([
-        'autoApproveHighRisk',
-        'autoClickGithubConfirmations',
-        'autoClickGithubAuthorization'
-      ], (items) => {
-        resolve({
-          autoApproveHighRisk: items.autoApproveHighRisk === true,
-          autoClickGithubConfirmations: items.autoClickGithubConfirmations === true,
-          autoClickGithubAuthorization: items.autoClickGithubAuthorization === true
-        });
+      chrome.storage.sync.get(['autoApproveHighRisk'], (items) => {
+        resolve({ autoApproveHighRisk: items.autoApproveHighRisk === true });
       });
     });
-  }
-
-  function isVisible(el) {
-    if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
-    const rect = el.getBoundingClientRect();
-    const style = window.getComputedStyle(el);
-    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
-  }
-
-  function buttonText(el) {
-    return String(el.innerText || el.value || el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
-  }
-
-  function closestContextText(el) {
-    const ctx = el.closest('[role="dialog"], dialog, form, main, .Box, .Overlay, .modal, .flash, .Popover, body');
-    return String(ctx ? ctx.innerText || ctx.textContent || '' : document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 3000);
-  }
-
-  function shouldAutoClickButton(el, settings) {
-    const text = buttonText(el);
-    if (!text || text.length > 80) return { ok: false };
-
-    const context = closestContextText(el);
-    const combined = `${text}\n${context}`;
-    const isGithubPage = location.hostname === 'github.com' || location.hostname.endsWith('.github.com');
-    const mentionsGithub = GITHUB_TEXT_RE.test(combined);
-
-    if (!isGithubPage && !mentionsGithub) return { ok: false };
-    if (DANGER_TEXT_RE.test(combined)) return { ok: false, reason: 'danger text detected' };
-
-    if (SAFE_CONFIRM_RE.test(text)) {
-      return { ok: settings.autoClickGithubConfirmations, category: 'safe-confirm', text };
-    }
-
-    if (AUTH_CONFIRM_RE.test(text)) {
-      return { ok: settings.autoClickGithubAuthorization, category: 'auth-confirm', text };
-    }
-
-    return { ok: false };
-  }
-
-  async function autoClickGithubConfirmations() {
-    const settings = await getSettings();
-    if (!settings.autoClickGithubConfirmations && !settings.autoClickGithubAuthorization) return;
-
-    const candidates = [
-      ...document.querySelectorAll('button, input[type="submit"], input[type="button"], a[role="button"], .btn')
-    ];
-
-    for (const el of candidates) {
-      if (!isVisible(el) || el.getAttribute(AUTOCLICK_ATTR) === '1') continue;
-      const decision = shouldAutoClickButton(el, settings);
-      if (!decision.ok) continue;
-      el.setAttribute(AUTOCLICK_ATTR, '1');
-      console.info('[WAAB] auto-clicking GitHub confirmation:', decision.category, decision.text);
-      setTimeout(() => {
-        try { el.click(); } catch (err) { console.error('[WAAB] auto-click failed', err); }
-      }, 250);
-      return;
-    }
   }
 
   function parseAgentCalls(text) {
@@ -193,12 +119,10 @@
   }
 
   function scan() {
-    autoClickGithubConfirmations().catch((err) => console.error('[WAAB] auto-click scan error', err));
     for (const node of findAssistantNodes()) processNode(node).catch((err) => console.error('WAAB scan error', err));
   }
 
   const observer = new MutationObserver(() => scan());
   observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-  setInterval(() => autoClickGithubConfirmations().catch(() => {}), 2000);
   scan();
 })();
