@@ -1,11 +1,13 @@
 'use strict';
 
 const input = document.getElementById('serverUrl');
+const autoApproveInput = document.getElementById('autoApproveHighRisk');
 const statusEl = document.getElementById('status');
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:8765';
 
-chrome.storage.sync.get(['serverUrl'], ({ serverUrl }) => {
+chrome.storage.sync.get(['serverUrl', 'autoApproveHighRisk'], ({ serverUrl, autoApproveHighRisk }) => {
   input.value = serverUrl || DEFAULT_SERVER_URL;
+  autoApproveInput.checked = autoApproveHighRisk === true;
 });
 
 function show(value) {
@@ -17,7 +19,10 @@ async function callBackground(type) {
 }
 
 document.getElementById('save').addEventListener('click', () => {
-  chrome.storage.sync.set({ serverUrl: input.value.trim() || DEFAULT_SERVER_URL }, () => show('Saved.'));
+  chrome.storage.sync.set({
+    serverUrl: input.value.trim() || DEFAULT_SERVER_URL,
+    autoApproveHighRisk: autoApproveInput.checked
+  }, () => show({ saved: true, autoApproveHighRisk: autoApproveInput.checked }));
 });
 
 document.getElementById('health').addEventListener('click', async () => {
