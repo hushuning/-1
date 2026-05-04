@@ -68,9 +68,19 @@ Skills：
 
 ## 安装
 
+仓库名以 `-` 开头，在 zsh/bash 里进入目录时要写 `./-1`，不能写 `cd -1`。
+
 ```bash
 git clone https://github.com/hushuning/-1.git
-cd -1
+cd ./-1
+npm test
+```
+
+或者 clone 时直接改成本地目录名：
+
+```bash
+git clone https://github.com/hushuning/-1.git web-ai-agent-bridge
+cd web-ai-agent-bridge
 npm test
 ```
 
